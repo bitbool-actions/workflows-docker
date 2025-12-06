@@ -1,6 +1,6 @@
 Sample usage:
 
-```
+```yaml
 name: Build and Push
 
 on:
