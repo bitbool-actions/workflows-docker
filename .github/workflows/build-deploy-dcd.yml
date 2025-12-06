@@ -1,0 +1,108 @@
+name: Build and deploy Docker container via DCD
+
+on:
+  workflow_call:
+    inputs:
+      DOCKER_USER:
+        required: true
+        type: string    
+      DOCKER_REPO:
+         required: true
+         type: string
+      DOCKER_REGISTRY:
+        required: false
+        default: "registry.hub.docker.com"
+        type: string
+      DOCKER_TAGS_SEND_COMMIT_HASH_FIRST:
+        required: false
+        default: "true"
+        type: string
+      QEMU_SETUP:
+        required: false
+        default: "true"
+        type: string
+      USE_ENV_FILES:
+        required: false
+        default: "true"
+        type: string
+      BUILD_CONTEXT:
+        required: false
+        default: "."
+        type: string
+      BUILD_SBOM:
+        required: false
+        default: "true"
+        type: string
+      BUILD_DOCKERFILE:
+        required: false
+        default: "./Dockerfile"
+        type: string
+      DEPLOY_URL:
+        required: false
+        default: "INVALID"
+        type: string
+      USE_PULL_REPO:
+        required: false
+        type: string
+        default: "false"
+
+    secrets:
+      DOCKER_PASSWORD:
+        required: true
+      AUTH_TOKEN:
+        required: true
+        
+jobs:
+  build:
+    name: "Build and deploy application"
+    concurrency: 
+      group: ${{ github.ref }}
+      cancel-in-progress: true
+    runs-on: [ubuntu-latest] 
+   
+    steps:
+        
+      - uses: actions/checkout@v6
+
+      - name: Read env
+        uses: bitbool-actions/read-env@main
+        id: read_env
+        with:
+          USE_ENV_FILES: "${{ inputs.USE_ENV_FILES }}"
+
+      - name: set deploy url env var from input
+        shell: bash
+        run: |
+          echo DEPLOY_URL=${{ inputs.DEPLOY_URL }} >> $GITHUB_ENV
+        if: ${{ inputs.DEPLOY_URL != 'INVALID' }}
+
+      - name: Docker prepare
+        uses: bitbool-actions/docker-prepare@main
+        id: docker_prepare
+        with:
+          DOCKER_REGISTRY: "${{ inputs.DOCKER_REGISTRY }}"
+          DOCKER_REPO: "${{ inputs.DOCKER_REPO }}"
+          QEMU_SETUP: "${{ inputs.QEMU_SETUP }}"
+          DOCKER_USER: "${{ inputs.DOCKER_USER }}"
+          DOCKER_PASSWORD: "${{ secrets.DOCKER_PASSWORD }}"
+          DOCKER_TAGS_SEND_COMMIT_HASH_FIRST: "${{ inputs.DOCKER_TAGS_SEND_COMMIT_HASH_FIRST }}"
+
+      - name: Build and push
+        id: docker_build
+        uses: docker/build-push-action@v6
+        with:
+          file: "${{ inputs.BUILD_DOCKERFILE }}"
+          context: "${{ inputs.BUILD_CONTEXT }}"
+          tags: ${{ steps.docker_prepare.outputs.tags }}
+          push: true
+          sbom: "${{ inputs.BUILD_SBOM }}"
+          cache-from: type=gha
+          cache-to: type=gha,mode=max   
+
+      - uses: bitbool-actions/docker-compose-deploy@master
+        id: docker_deploy
+        with:
+          AUTH_TOKEN: "${{ secrets.AUTH_TOKEN }}"
+          USE_PULL_REPO: "${{ inputs.USE_PULL_REPO }}"
+          DEPLOY_URL: "${{ env.DEPLOY_URL }}"
+          IMAGES: "${{ steps.docker_prepare.outputs.images_with_tags }}"
